@@ -1,0 +1,4 @@
+This is a work in progress implementation of the coral distributed 
+hash table. It is in the research and development phase. We are reusing
+the kademlia routing structure of the existing hash table and adding 
+sloppy storage/a hierarchical cluster system for insertion and retrieval.
