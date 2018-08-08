@@ -1,24 +1,25 @@
 package coral
 
 import (
+	"context"
 	"math/big"
 	"time"
 
+	host "github.com/libp2p/go-libp2p-host"
+	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
+	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
-
-	kb "github.com/libp2p/go-libp2p-kbucket"
 )
 
 type coralNode struct {
-
-	// host host.Host        // the network services we need
-	id peer.ID // Local peer (yourself)
-	// ctx  context.Context
+	host host.Host // the network services we need
+	id   peer.ID   // Local peer (yourself)
+	ctx  context.Context
 
 	// datastore ds.Datastore // Local data
 
-	// peerstore pstore.Peerstore // Peer Registry
+	peerstore pstore.Peerstore // Peer Registry
 
 	// birth time.Time // When this peer started up
 
@@ -27,38 +28,93 @@ type coralNode struct {
 	levelTwo  *Cluster //peers are stored by their lowest common denominator
 	levelOne  *Cluster //cluster. for example, if a peer has the same level 2
 	levelZero *Cluster //cluster id, it will be stored in the level 2 routing table.
-
+	//protocols []protocol.ID // DHT protocols
 }
 
-func NewCNode(id peer.ID) *coralNode {
+func New(ctx context.Context, h host.Host, options ...opts.Option) (*coralNode, error) {
 	n := new(coralNode)
+	n.id = h.ID()
+	n.peerstore = h.Peerstore()
+	n.host = h
+	n.ctx = ctx
 	m := pstore.NewMetrics()
-	n.levelTwo = NewCluster(10, kb.ConvertPeerID(id), time.Hour, m, "2") //going to want to join clusters immediately via discovery
-	n.levelOne = NewCluster(10, kb.ConvertPeerID(id), time.Hour, m, "1")
-	n.levelZero = NewCluster(10, kb.ConvertPeerID(id), time.Hour, m, "0")
+	n.levelTwo = NewCluster(10, kb.ConvertPeerID(n.id), time.Hour, m, "2") //going to want to join clusters immediately via discovery
+	n.levelOne = NewCluster(10, kb.ConvertPeerID(n.id), time.Hour, m, "1")
+	n.levelZero = NewCluster(10, kb.ConvertPeerID(n.id), time.Hour, m, "0")
 	n.peerToClust = make(map[peer.ID]ClusterID)
-	return n
+	return n, nil
 }
 
-func (cNode *coralNode) insert(key string, id peer.ID) {
-	fullAndLoaded := false
+func (cNode *coralNode) Update(ctx context.Context, p peer.ID) {
+	cNode.levelTwo.routingTable.Update(p)
+}
+
+func (cNode *coralNode) PutValue(ctx context.Context, key string, value []byte) error {
+	//cNode.insert(key, value)
+	return nil
+}
+
+func (cNode *coralNode) GetValue(ctx context.Context, key string) ([]byte, error) {
+
+	return []byte("world"), nil
+}
+
+//find node in own level two routing table
+//return slice of type peer ids
+// func (cNode *coralNode) findMidpointNode(key string, distance big.Int) []peer.ID {
+//
+// }
+func (cNode *coralNode) insert(ctx context.Context, key string, storeid peer.ID) {
 	totaldist := kb.Dist(cNode.id, key) //what is the total distance to the key
+	epsilon := big.NewInt(1)
+	var nodeStack []peer.ID
 	dist := totaldist
-	node := cNode.id
-	for !fullAndLoaded && dist != big.NewInt(1) {
-		//once you get the next node, ADD IT to your routingTable
-		if dist != totaldist {
-			cNode.addCNode(node, cNode.levelTwo.clusterID)
+	nextKey := key
+	var chosenNode peer.ID
+	for dist != epsilon {
+
+		nextKey = calculateMidpointKey(nextKey, dist) //add dist to previous Nextkey
+		if dist != totaldist {                        //for first round
+			findAndAddNextNode(nextKey, chosenNode)
 		}
-		node = cNode.levelTwo.getNextNode(key, node) //in case your routing table had something closer originally
-		//send a QUERY of type getNextNode to another node, they respond with results of getNextNode(key, self) or they will respond
-		//that the node is full and loaded for that key
-		//QUERYNODE
-		dist = kb.Dist(node, key)
+		//query routing table
+		chosenNode = cNode.levelTwo.getNextNode(nextKey, cNode.id)
+		nodeStack = append(nodeStack, chosenNode)
+		dist = dist.Div(dist, big.NewInt(2))
 
 	}
 
-	//putValuetopeer
+	putValueToPeer(ctx, nodeStack, key, storeid)
+
+}
+
+func putValueToPeer(ctx context.Context, nodeStack []peer.ID, key string, value peer.ID) {
+	//	fullAndLoaded := true
+	// var chosenNode peer.ID
+	// for fullAndLoaded {
+	// 	chosenNode, nodeStack = nodeStack[len(nodeStack)-1], nodeStack[:len(nodeStack)-1]
+	//pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
+	//set up record with value
+	//pmes.Record = rec
+	// rpmes, err := dht.sendRequest(ctx, chosenNode, pmes)
+	// if err != nil {
+	// 	fullAndLoaded = true
+	// } else {
+	// 	fullAndLoaded = false
+	// }
+
+	//can I store the data here?
+	//fullAndLoaded = dht.sendRequest(ctx, ChosenNode, pmes)
+	//	}
+
+}
+
+func findAndAddNextNode(nextKey string, ChosenNode peer.ID) {
+
+}
+
+func calculateMidpointKey(nextKey string, dist *big.Int) string {
+	return nextKey
 }
 
 //need to implement these, maybe where we implement the getNextNode RPC
