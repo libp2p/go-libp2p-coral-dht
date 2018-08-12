@@ -17,12 +17,12 @@ type cNodeHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, erro
 
 func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler {
 	switch t {
-	// case pb.Message_GET_VALUE:
-	// 	return cNode.handleGetValue
+	case pb.Message_GET_VALUE:
+		return cNode.handleGetValue
 	case pb.Message_PUT_VALUE:
 		return cNode.handlePutValue
 	// case pb.Message_FIND_NODE:
-	// 	return cNode.handleFindPeer
+	//   return cNode.handleFindPeer
 	// case pb.Message_ADD_PROVIDER:
 	// 	return cNode.handleAddProvider
 	// case pb.Message_GET_PROVIDERS:
@@ -34,7 +34,16 @@ func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler
 	}
 }
 
-func (dht *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+	//store in local data store
+
  return pmes, err
 
+}
+
+func (cNode *coralNode) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+
+
+ cNode.nearestPeersToQuery(pmes, 1)
+ return pmes
 }

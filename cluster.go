@@ -13,12 +13,14 @@ type ClusterID string
 type Cluster struct {
 	routingTable *kb.RoutingTable
 	clusterID    ClusterID
+	level        int
 }
 
-func NewCluster(bucketsize int, localID kb.ID, latency time.Duration, m pstore.Metrics, clustID ClusterID) *Cluster {
+func NewCluster(bucketsize int, localID kb.ID, latency time.Duration, m pstore.Metrics, level int, clustID ClusterID) *Cluster {
 	c := new(Cluster)
 	c.routingTable = kb.NewRoutingTable(bucketsize, localID, latency, m)
 	c.clusterID = clustID
+	c.level = level
 	return c
 }
 
