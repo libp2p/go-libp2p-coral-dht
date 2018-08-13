@@ -15,24 +15,18 @@ func (nn *netNotifiee) coralNode() *coralNode {
 
 func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	coralNode := nn.coralNode()
-	select {
-	case <-coralNode.proc.Closing():
-		return
-	default:
-	}
 
 	p := v.RemotePeer()
-	protos, err := coralNode.peerstore.SupportsProtocols(p, coralNode.protocolStrs()...)
-	if err == nil && len(protos) != 0 {
-		// We lock here for consistency with the lock in testConnection.
-		// This probably isn't necessary because (dis)connect
-		// notifications are serialized but it's nice to be consistent.
-		//coralNode.plk.Lock()
-		//defer coralNode.plk.Unlock()
-		if coralNode.host.Network().Connectedness(p) == inet.Connected {
-			coralNode.Update(coralNode.ctx, p)
-		}
-		return
+	//	protos, err := coralNode.peerstore.SupportsProtocols(p, coralNode.protocolStrs()...)
+
+	// We lock here for consistency with the lock in testConnection.
+	// This probably isn't necessary because (dis)connect
+	// notifications are serialized but it's nice to be consistent.
+	//coralNode.plk.Lock()
+	//defer coralNode.plk.Unlock()
+	if coralNode.host.Network().Connectedness(p) == inet.Connected {
+		coralNode.Update(coralNode.ctx, p)
+
 	}
 
 	// Note: Unfortunately, the peerstore may not yet know that this peer is

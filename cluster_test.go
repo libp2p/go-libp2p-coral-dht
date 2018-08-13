@@ -11,14 +11,13 @@ import (
 
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
 
-	logging "github.com/ipfs/go-log"
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
+	logging "github.com/ipfs/go-log"
 
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
 
- routing "github.com/libp2p/go-libp2p-routing"
 	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 
@@ -119,8 +118,8 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *coralNode) {
 	if len(addrB) == 0 {
 		t.Fatal("peers setup incorrectly: no local address")
 	}
-	nn1 := (*netNotifiee)(a)
-	nn2 := (*netNotifiee)(b)
+	// nn1 := (*netNotifiee)(a)
+	// nn2 := (*netNotifiee)(b)
 
 	a.peerstore.AddAddrs(idB, addrB, pstore.TempAddrTTL)
 	pi := pstore.PeerInfo{ID: idB}
@@ -128,12 +127,12 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *coralNode) {
 		t.Fatal(err)
 	}
 
-	c12 := a.host.Network().ConnsToPeer(b.id)[0]
-	c21 := b.host.Network().ConnsToPeer(a.id)[0]
+	// c12 := a.host.Network().ConnsToPeer(b.id)[0]
+	// c21 := b.host.Network().ConnsToPeer(a.id)[0]
 
 	// Pretend to reestablish/re-kill connection
-	nn1.Connected(a.host.Network(), c12)
-	nn2.Connected(b.host.Network(), c21)
+	// nn1.Connected(a.host.Network(), c12)
+	// nn2.Connected(b.host.Network(), c21)
 
 }
 
@@ -159,7 +158,6 @@ func connect(t *testing.T, ctx context.Context, a, b *coralNode) {
 	wait(t, ctx, b, a)
 }
 
-
 func TestValueGetSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -171,6 +169,7 @@ func TestValueGetSet(t *testing.T) {
 		//defer dhts[i].Close()
 		defer dhts[i].host.Close()
 	}
+
 	fmt.Printf("before connect")
 	connect(t, ctx, dhts[0], dhts[1])
 
@@ -195,45 +194,44 @@ func TestValueGetSet(t *testing.T) {
 		t.Fatalf("Expected 'world' got '%s'", string(val))
 	}
 
-	// late connect
-	connect(t, ctx, dhts[2], dhts[0])
-	connect(t, ctx, dhts[2], dhts[1])
+	// // late connect
+	// connect(t, ctx, dhts[2], dhts[0])
+	// connect(t, ctx, dhts[2], dhts[1])
 
-	t.Log("requesting value (offline) on dhts: ", dhts[2].id)
-	vala, err := dhts[2].GetValue(ctxT, "/v/hello")
-	if vala != nil {
-		t.Fatalf("offline get should have failed, got %s", string(vala))
-	}
-	if err != routing.ErrNotFound {
-		t.Fatalf("offline get should have failed with ErrNotFound, got: %s", err)
-	}
-
-	t.Log("requesting value (online) on dhts: ", dhts[2].id)
-	val, err = dhts[2].GetValue(ctxT, "/v/hello")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(val) != "world" {
-		t.Fatalf("Expected 'world' got '%s'", string(val))
-	}
-
-	for _, d := range dhts[:3] {
-		connect(t, ctx, dhts[3], d)
-	}
-	connect(t, ctx, dhts[4], dhts[3])
-
-	t.Log("requesting value (requires peer routing) on dhts: ", dhts[4].id)
-	val, err = dhts[4].GetValue(ctxT, "/v/hello")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(val) != "world" {
-		t.Fatalf("Expected 'world' got '%s'", string(val))
-	}
+	// t.Log("requesting value (offline) on dhts: ", dhts[2].id)
+	// vala, err := dhts[2].GetValue(ctxT, "/v/hello")
+	// if vala != nil {
+	// 	t.Fatalf("offline get should have failed, got %s", string(vala))
+	// }
+	// if err != routing.ErrNotFound {
+	// 	t.Fatalf("offline get should have failed with ErrNotFound, got: %s", err)
+	// }
+	//
+	// t.Log("requesting value (online) on dhts: ", dhts[2].id)
+	// val, err = dhts[2].GetValue(ctxT, "/v/hello")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	//
+	// if string(val) != "world" {
+	// 	t.Fatalf("Expected 'world' got '%s'", string(val))
+	// }
+	//
+	// for _, d := range dhts[:3] {
+	// 	connect(t, ctx, dhts[3], d)
+	// }
+	// connect(t, ctx, dhts[4], dhts[3])
+	//
+	// t.Log("requesting value (requires peer routing) on dhts: ", dhts[4].id)
+	// val, err = dhts[4].GetValue(ctxT, "/v/hello")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	//
+	// if string(val) != "world" {
+	// 	t.Fatalf("Expected 'world' got '%s'", string(val))
+	// }
 }
-
 
 //
 // import (
