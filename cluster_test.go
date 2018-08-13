@@ -130,7 +130,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *coralNode) {
 	// c12 := a.host.Network().ConnsToPeer(b.id)[0]
 	// c21 := b.host.Network().ConnsToPeer(a.id)[0]
 
-	// Pretend to reestablish/re-kill connection
+	//	Pretend to reestablish/re-kill connection
 	// nn1.Connected(a.host.Network(), c12)
 	// nn2.Connected(b.host.Network(), c21)
 

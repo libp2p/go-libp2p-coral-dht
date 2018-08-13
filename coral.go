@@ -21,14 +21,14 @@ import (
 )
 
 type coralNode struct {
-	host host.Host // the network services we need
-	id   peer.ID   // Local peer (yourself)
-	ctx  context.Context
-	proc goprocess.Process
-	// datastore ds.Datastore // Local data
+	host      host.Host // the network services we need
+	id        peer.ID   // Local peer (yourself)
+	ctx       context.Context
+	proc      goprocess.Process
+	datastore ds.Datastore // Local data
 
 	peerstore pstore.Peerstore // Peer Registry
-
+	Validator record.Validator
 	// birth time.Time // When this peer started up
 
 	peerToClust map[peer.ID]ClusterID //should be a triple, for now just implemented for level 2
@@ -49,7 +49,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*coralNode, 
 	n := makeNode(ctx, h, cfg.Datastore, cfg.Protocols)
 	// register for network notifs.
 	n.host.Network().Notify((*netNotifiee)(n))
-
+	n.Validator = cfg.Validator
 	n.proc = goprocessctx.WithContextAndTeardown(ctx, func() error {
 		// remove ourselves from network notifs.
 		n.host.Network().StopNotify((*netNotifiee)(n))
@@ -68,6 +68,7 @@ func makeNode(ctx context.Context, h host.Host, dstore ds.Batching, protocols []
 	n.id = h.ID()
 	n.peerstore = h.Peerstore()
 	n.host = h
+	n.datastore = dstore
 	n.ctx = ctx
 	m := pstore.NewMetrics()
 	n.levelTwo = NewCluster(10, kb.ConvertPeerID(n.id), time.Hour, m, 2, "2") //going to want to join clusters immediately via discovery
@@ -92,7 +93,7 @@ func (cNode *coralNode) Update(ctx context.Context, p peer.ID) {
 }
 
 func (cNode *coralNode) PutValue(ctx context.Context, key string, value []byte) error {
-	//cNode.insert(key, value)
+	cNode.insert(ctx, key, value)
 	return nil
 }
 
@@ -120,7 +121,7 @@ func (cNode *coralNode) insert(ctx context.Context, key string, value []byte) {
 			cNode.findAndAddNextNode(ctx, nextKey, chosenNode)
 		}
 		//query routing table
-		chosenNode = cNode.levelTwo.getNextNode(nextKey, cNode.id)
+		chosenNode = cNode.levelTwo.routingTable.NearestPeer(kb.ConvertKey(nextKey))
 		nodeStack = append(nodeStack, chosenNode)
 		dist = dist.Div(dist, big.NewInt(2))
 
