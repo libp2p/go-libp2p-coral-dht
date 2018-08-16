@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"time"
+	"fmt"
 	ds "github.com/ipfs/go-datastore"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
 recpb "github.com/libp2p/go-libp2p-record/pb"
 	peer "github.com/libp2p/go-libp2p-peer"
 base32 "github.com/whyrusleeping/base32"
 proto "github.com/gogo/protobuf/proto"
 u "github.com/ipfs/go-ipfs-util"
 pstore "github.com/libp2p/go-libp2p-peerstore"
-inet "github.com/libp2p/go-libp2p-net"
+//inet "github.com/libp2p/go-libp2p-net"
 
 )
 
@@ -20,12 +21,12 @@ type cNodeHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, erro
 
 func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler {
 	switch t {
-	//case pb.Message_GET_VALUE:
-		//return cNode.handleGetValue
+	// case pb.Message_GET_VALUE:
+	// 	return cNode.handleGetValue
 	case pb.Message_PUT_VALUE:
 		return cNode.handlePutValue
-	 case pb.Message_FIND_NODE:
-	  return cNode.handleFindNode
+	case pb.Message_FIND_NODE:
+	 return cNode.handleFindPeer
 	// case pb.Message_ADD_PROVIDER:
 	// 	return cNode.handleAddProvider
 	// case pb.Message_GET_PROVIDERS:
@@ -101,54 +102,29 @@ func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.
 	return pmes, err
 }
 
-func (cNode *coralNode) handleFindNode(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
+func (cNode *coralNode) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 
 
  resp := pb.NewMessage(pmes.GetType(), "", pmes.GetClusterLevel())
  var nearest []peer.ID
 
 
- // if looking for self... special case where we send it on CloserPeers.
-	targetPid := peer.ID(pmes.GetKey())
+	nearest = cNode.nearestPeersToQuery(pmes, 1)
 
-	if targetPid == cNode.id {
-		nearest = []peer.ID{cNode.id}
-	} else {
-		nearest = cNode.nearestPeersToQuery(pmes, 1)
-
-		// Never tell a peer about itself.
-		if targetPid != p {
-			// If we're connected to the target peer, report their
-			// peer info. This makes FindPeer work even if the
-			// target peer isn't in our routing table.
-			//
-			// Alternatively, we could just check our peerstore.
-			// However, we don't want to return out of date
-			// information. We can change this in the future when we
-			// add a progressive, asynchronous `SearchPeer` function
-			// and improve peer routing in the host.
-			switch cNode.host.Network().Connectedness(targetPid) {
-			case inet.Connected, inet.CanConnect:
-				nearest = append(nearest, targetPid)
-			}
-		}
-	}
-
-	if nearest == nil {
-		//log.Infof("%s handleFindPeer %s: could not find anything.", cNode.id, p)
-		return resp, nil
-	}
 
 	nearestinfos := pstore.PeerInfos(cNode.peerstore, nearest)
 	// possibly an over-allocation but this array is temporary anyways.
 	withAddresses := make([]pstore.PeerInfo, 0, len(nearestinfos))
 	for _, pi := range nearestinfos {
-		if len(pi.Addrs) > 0 {
+
+		if len(pi.Addrs) > 0 && pi.ID != p {
 			withAddresses = append(withAddresses, pi)
-		//	log.Debugf("handleFindPeer: sending back '%s'", pi.ID)
+
+		fmt.Printf("handleFindPeer: sending back '%s' %s\n", pi.ID, pi.Addrs)
 		}
 	}
 
-	resp.CloserPeers = pb.PeerInfosToPBPeers(cNode.host.Network(), withAddresses)
+  resp.CloserPeers = pb.PeerInfosToPBPeers(cNode.host.Network(), withAddresses)
+	fmt.Printf("Response closer peers %s\n", resp.CloserPeers)
 	return resp, nil
 }

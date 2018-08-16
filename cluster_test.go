@@ -138,7 +138,7 @@ func connectNoSync(t *testing.T, ctx context.Context, a, b *coralNode) {
 
 func wait(t *testing.T, ctx context.Context, a, b *coralNode) {
 	t.Helper()
-	fmt.Printf("wait")
+
 	// loop until connection notification has been received.
 	// under high load, this may not happen as immediately as we would like.
 	for a.levelTwo.routingTable.Find(b.id) == "" {
@@ -152,7 +152,7 @@ func wait(t *testing.T, ctx context.Context, a, b *coralNode) {
 
 func connect(t *testing.T, ctx context.Context, a, b *coralNode) {
 	t.Helper()
-	fmt.Printf("before connect no sync")
+
 	connectNoSync(t, ctx, a, b)
 	wait(t, ctx, a, b)
 	wait(t, ctx, b, a)
@@ -161,7 +161,7 @@ func connect(t *testing.T, ctx context.Context, a, b *coralNode) {
 func TestValueGetSet(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	fmt.Printf("before connect")
+
 	var dhts [5]*coralNode
 
 	for i := range dhts {
@@ -170,8 +170,9 @@ func TestValueGetSet(t *testing.T) {
 		defer dhts[i].host.Close()
 	}
 
-	fmt.Printf("before connect")
 	connect(t, ctx, dhts[0], dhts[1])
+	connect(t, ctx, dhts[1], dhts[2])
+	connect(t, ctx, dhts[1], dhts[3])
 
 	t.Log("adding value on: ", dhts[0].id)
 	ctxT, cancel := context.WithTimeout(ctx, time.Second)

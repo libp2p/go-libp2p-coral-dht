@@ -3,15 +3,17 @@ package coral
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
+	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
 	host "github.com/libp2p/go-libp2p-host"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -46,6 +48,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*coralNode, 
 		return nil, err
 	}
 
+	cfg.Protocols = []protocol.ID{protocol.ID("/ipfs/coral")}
 	n := makeNode(ctx, h, cfg.Datastore, cfg.Protocols)
 	// register for network notifs.
 	n.host.Network().Notify((*netNotifiee)(n))
@@ -57,6 +60,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*coralNode, 
 	})
 
 	for _, p := range cfg.Protocols {
+		fmt.Printf("%s\n", p)
 		h.SetStreamHandler(p, n.handleNewStream)
 	}
 
@@ -76,6 +80,7 @@ func makeNode(ctx context.Context, h host.Host, dstore ds.Batching, protocols []
 	n.levelZero = NewCluster(10, kb.ConvertPeerID(n.id), time.Hour, m, 0, "0")
 	n.peerToClust = make(map[peer.ID]ClusterID)
 	n.strmap = make(map[peer.ID]*messageSender)
+	n.protocols = protocols
 	return n
 }
 
@@ -93,8 +98,7 @@ func (cNode *coralNode) Update(ctx context.Context, p peer.ID) {
 }
 
 func (cNode *coralNode) PutValue(ctx context.Context, key string, value []byte) error {
-	cNode.insert(ctx, key, value)
-	return nil
+	return cNode.insert(ctx, key, value)
 }
 
 func (cNode *coralNode) GetValue(ctx context.Context, key string) ([]byte, error) {
@@ -107,18 +111,26 @@ func (cNode *coralNode) GetValue(ctx context.Context, key string) ([]byte, error
 // func (cNode *coralNode) findMidpointNode(key string, distance big.Int) []peer.ID {
 //
 // }
-func (cNode *coralNode) insert(ctx context.Context, key string, value []byte) {
-	totaldist := kb.Dist(cNode.id, key) //what is the total distance to the key
+func (cNode *coralNode) insert(ctx context.Context, key string, value []byte) error {
+	totaldist := kb.Dist(cNode.id, key)
+	dist := kb.Dist(cNode.id, key)
+	//what is the total distance to the key
 	epsilon := big.NewInt(1)
+	//fmt.Printf("Distance from %s to %s is %s, %d\n", cNode.id.String(), key, totaldist.String(), totaldist.Cmp(epsilon))
+
 	var nodeStack []peer.ID
-	dist := totaldist
+
 	nextKey := key
 	var chosenNode peer.ID
-	for dist != epsilon {
-
+	for dist.Cmp(epsilon) > 0 {
+		fmt.Printf("Entered top of insert for loop\n")
 		nextKey = kb.CalculateMidpointKey(nextKey, dist) //add dist to previous Nextkey
-		if dist != totaldist {                           //for first round
-			cNode.findAndAddNextNode(ctx, nextKey, chosenNode)
+		if dist.Cmp(totaldist) != 0 {
+			fmt.Printf("chosen node: %s\n", chosenNode) //for first round, this is messy fix it
+			_, err := cNode.findAndAddNextNode(ctx, nextKey, chosenNode)
+			if err != nil {
+				return err
+			}
 		}
 		//query routing table
 		chosenNode = cNode.levelTwo.routingTable.NearestPeer(kb.ConvertKey(nextKey))
@@ -128,49 +140,62 @@ func (cNode *coralNode) insert(ctx context.Context, key string, value []byte) {
 	}
 	rec := record.MakePutRecord(key, value)
 	cNode.putValueToPeer(ctx, nodeStack, rec, key)
-
+	return nil
 }
 
-func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID, rec *recpb.Record, key string) {
+func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID, rec *recpb.Record, key string) error {
 	fullAndLoaded := true
 	var chosenNode peer.ID
-
+	if len(nodeStack) == 0 {
+		return errors.New("Attempted to put value with empty node stack.")
+	}
 	for fullAndLoaded {
+
 		chosenNode, nodeStack = nodeStack[len(nodeStack)-1], nodeStack[:len(nodeStack)-1]
 		pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
 		pmes.Record = rec
 		rpmes, err := cNode.sendRequest(ctx, chosenNode, pmes)
+
 		if err != nil {
 			if err == ErrReadTimeout {
-				//log.Warningf("read timeout: %s %s", chosenNode.Pretty(), key)
+				fmt.Printf("read timeout: %s %s", chosenNode.Pretty(), key)
 			}
-			if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
-
-			}
-
-		} else {
-			fullAndLoaded = false
+			return err
 		}
 
+		if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
+			return errors.New("value not put correctly")
+		}
+		fullAndLoaded = false
 	}
+	return nil
 }
 func (cNode *coralNode) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
 	closer := cNode.levelTwo.routingTable.NearestPeers(kb.ConvertKey(pmes.GetKey()), count)
 	return closer
 }
 
-func (cNode *coralNode) findAndAddNextNode(ctx context.Context, key string, receiverNode peer.ID) peer.ID {
+func (cNode *coralNode) findAndAddNextNode(ctx context.Context, key string, receiverNode peer.ID) (peer.ID, error) {
+	fmt.Printf("Entered findandAddNextNode for key: %s, and recievernode: %s \n", key, receiverNode)
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, key, 0)
 	resp, err := cNode.sendRequest(ctx, receiverNode, pmes)
 	if err != nil {
-
+		return peer.ID(""), err
 	}
+
 	closer := resp.GetCloserPeers()
 	clpeers := pb.PBPeersToPeerInfos(closer)
-	nextNode := clpeers[0].ID
-	//once you get the next node, add it to your routing table
+	var nextNode peer.ID
+	if len(clpeers) > 0 {
+		nextNode = clpeers[0].ID
+	} else {
+		nextNode = cNode.id
+	}
+	///	once you get the next node, add it to your routing table
 	cNode.addCNode(nextNode, cNode.levelTwo.clusterID)
-	return nextNode
+	fmt.Printf("Found node id: %s\n", nextNode.Pretty())
+	//return receiverNode, nil
+	return nextNode, nil
 }
 
 //local node joins cluster

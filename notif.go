@@ -1,6 +1,8 @@
 package coral
 
 import (
+	"fmt"
+
 	inet "github.com/libp2p/go-libp2p-net"
 	ma "github.com/multiformats/go-multiaddr"
 	mstream "github.com/multiformats/go-multistream"
@@ -17,18 +19,14 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	coralNode := nn.coralNode()
 
 	p := v.RemotePeer()
-	//	protos, err := coralNode.peerstore.SupportsProtocols(p, coralNode.protocolStrs()...)
+	protos, err := coralNode.peerstore.SupportsProtocols(p, coralNode.protocolStrs()...)
+	if err == nil || len(protos) != 0 {
+		fmt.Printf("protocol success\n")
 
-	// We lock here for consistency with the lock in testConnection.
-	// This probably isn't necessary because (dis)connect
-	// notifications are serialized but it's nice to be consistent.
-	//coralNode.plk.Lock()
-	//defer coralNode.plk.Unlock()
-	if coralNode.host.Network().Connectedness(p) == inet.Connected {
-		coralNode.Update(coralNode.ctx, p)
-
+		if coralNode.host.Network().Connectedness(p) == inet.Connected {
+			coralNode.Update(coralNode.ctx, p)
+		}
 	}
-
 	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a coralNode server. So, if it didn't return a positive response above, test
 	// manually.
@@ -63,6 +61,7 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	//	coralNode.plk.Lock()
 	//defer coralNode.plk.Unlock()
 	if coralNode.host.Network().Connectedness(p) == inet.Connected {
+
 		coralNode.Update(coralNode.ctx, p)
 	}
 }

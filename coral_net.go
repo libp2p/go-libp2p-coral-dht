@@ -9,12 +9,12 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	ctxio "github.com/jbenet/go-context/io"
-	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
-var dhtReadMessageTimeout = time.Minute
+var cNodeReadMessageTimeout = time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
 
 // handleNewStream implements the inet.StreamHandler
@@ -40,7 +40,7 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 		case nil:
 		default:
 			s.Reset()
-		//	log.Debugf("Error unmarshaling data: %s", err)
+			fmt.Printf("Error unmarshaling data: %s", err)
 			return
 		}
 
@@ -48,10 +48,10 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 		cNode.updateFromMessage(ctx, mPeer, pmes)
 
 		// get handler for this msg type.
-		handler := cNode.handlerForMsgType(pmes.GetType())
+		handler := cNode .handlerForMsgType(pmes.GetType())
 		if handler == nil {
 			s.Reset()
-		//	log.Debug("got back nil handler from handlerForMsgType")
+			fmt.Printf("got back nil handler from handlerForMsgType")
 			return
 		}
 
@@ -59,20 +59,20 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 		rpmes, err := handler(ctx, mPeer, pmes)
 		if err != nil {
 			s.Reset()
-		//	log.Debugf("handle message error: %s", err)
+			fmt.Printf("handle message error: %s", err)
 			return
 		}
 
 		// if nil response, return it before serializing
 		if rpmes == nil {
-		//	log.Debug("got back nil response from request")
+			//log.Debug("got back nil response from request")
 			continue
 		}
 
 		// send out response msg
 		if err := w.WriteMsg(rpmes); err != nil {
 			s.Reset()
-		//	log.Debugf("send response error: %s", err)
+			fmt.Printf("send response error: %s", err)
 			return
 		}
 	}
@@ -98,7 +98,7 @@ func (cNode *coralNode) sendRequest(ctx context.Context, p peer.ID, pmes *pb.Mes
 	cNode.updateFromMessage(ctx, p, rpmes)
 
 	cNode.peerstore.RecordLatency(p, time.Since(start))
-//	log.Event(ctx, "dhtReceivedMessage", dht.self, p, rpmes)
+	//log.Event(ctx, "cNode ReceivedMessage", cNode .self, p, rpmes)
 	return rpmes, nil
 }
 
@@ -112,34 +112,35 @@ func (cNode *coralNode) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Mes
 	if err := ms.SendMessage(ctx, pmes); err != nil {
 		return err
 	}
-	//.log.Event(ctx, "dhtSentMessage", dht.self, p, pmes)
+	//log.Event(ctx, "cNode SentMessage", cNode .self, p, pmes)
 	return nil
 }
 
 func (cNode *coralNode) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
-	// Make sure that this node is actually a DHT server, not just a client.
-
+	// Make sure that this node is actually a cNode server, not just a client.
+	protos, err := cNode.peerstore.SupportsProtocols(p, cNode .protocolStrs()...)
+	if err == nil && len(protos) > 0 {
 		cNode.Update(ctx, p)
-
+	}
 	return nil
 }
 
 func (cNode *coralNode) messageSenderForPeer(p peer.ID) (*messageSender, error) {
-	//dht.smlk.Lock()
-	ms, ok :=  cNode.strmap[p]
-	if ok {
-		//dht.smlk.Unlock()
-		return ms, nil
-	}
-	ms = &messageSender{p: p, cNode: cNode}
+	// cNode.smlk.Lock()
+	ms := cNode.strmap[p]
+	// if ok {
+	// 	cNode.smlk.Unlock()
+	// 	return ms, nil
+	// }
+	ms = &messageSender{p: p, cNode : cNode }
 	cNode.strmap[p] = ms
-//	dht.smlk.Unlock()
+	//cNode .smlk.Unlock()
 
 	if err := ms.prepOrInvalidate(); err != nil {
-		//dht.smlk.Lock()
-		//defer dht.smlk.Unlock()
+		//cNode .smlk.Lock()
+		//defer cNode .smlk.Unlock()
 
-		if msCur, ok := cNode.strmap[p]; ok {
+	msCur := cNode.strmap[p];
 			// Changed. Use the new one, old one is invalid and
 			// not in the map so we can just throw it away.
 			if ms != msCur {
@@ -147,11 +148,12 @@ func (cNode *coralNode) messageSenderForPeer(p peer.ID) (*messageSender, error) 
 			}
 			// Not changed, remove the now invalid stream from the
 			// map.
-			delete(cNode.strmap, p)
+			delete(cNode .strmap, p)
+				return nil, err
 		}
 		// Invalid but not in map. Must have been removed by a disconnect.
-		return nil, err
-	}
+
+
 	// All ready to go.
 	return ms, nil
 }
@@ -197,7 +199,7 @@ func (ms *messageSender) prep() error {
 		return nil
 	}
 
-	nstr, err := ms.cNode.host.NewStream(ms.cNode.ctx, ms.p, ms.cNode.protocols...)
+	nstr, err := ms.cNode .host.NewStream(ms.cNode .ctx, ms.p, ms.cNode .protocols...)
 	if err != nil {
 		return err
 	}
@@ -228,16 +230,16 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			ms.s = nil
 
 			if retry {
-				//log.Info("error writing message, bailing: ", err)
+			//	log.Info("error writing message, bailing: ", err)
 				return err
 			} else {
-			//log.Info("error writing message, trying again: ", err)
+			//	log.Info("error writing message, trying again: ", err)
 				retry = true
 				continue
 			}
 		}
 
-		//log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		//log.Event(ctx, "cNode SentMessage", ms.cNode .self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)
@@ -279,16 +281,17 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 			ms.s = nil
 
 			if retry {
-			//	log.Info("error reading message, bailing: ", err)
+				fmt.Printf("error reading message, bailing: %s\n", err)
+
 				return nil, err
 			} else {
-			//	log.Info("error reading message, trying again: ", err)
+				fmt.Printf("error reading message, trying again: %s\n", err)
 				retry = true
 				continue
 			}
 		}
 
-	//	log.Event(ctx, "dhtSentMessage", ms.dht.self, ms.p, pmes)
+		//log.Event(ctx, "cNode SentMessage", ms.cNode .self, ms.p, pmes)
 
 		if ms.singleMes > streamReuseTries {
 			go inet.FullClose(ms.s)
@@ -302,12 +305,13 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 }
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
+	fmt.Printf("ctxReadMsg\n")
 	errc := make(chan error, 1)
 	go func(r ggio.ReadCloser) {
 		errc <- r.ReadMsg(mes)
 	}(ms.r)
 
-	t := time.NewTimer(dhtReadMessageTimeout)
+	t := time.NewTimer(cNodeReadMessageTimeout)
 	defer t.Stop()
 
 	select {
