@@ -11,9 +11,9 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/jbenet/goprocess"
 	goprocessctx "github.com/jbenet/goprocess/context"
-	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
 	host "github.com/libp2p/go-libp2p-host"
 	opts "github.com/libp2p/go-libp2p-kad-dht/opts"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	kb "github.com/libp2p/go-libp2p-kbucket"
 	peer "github.com/libp2p/go-libp2p-peer"
 	pstore "github.com/libp2p/go-libp2p-peerstore"
@@ -152,7 +152,7 @@ func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID,
 	for fullAndLoaded {
 
 		chosenNode, nodeStack = nodeStack[len(nodeStack)-1], nodeStack[:len(nodeStack)-1]
-		pmes := pb.NewMessage(pb.Message_PUT_VALUE, key, 0)
+		pmes := pb.NewMessage(pb.Message_PUT_VALUE, []byte(key), 0)
 		pmes.Record = rec
 		rpmes, err := cNode.sendRequest(ctx, chosenNode, pmes)
 
@@ -171,13 +171,13 @@ func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID,
 	return nil
 }
 func (cNode *coralNode) nearestPeersToQuery(pmes *pb.Message, count int) []peer.ID {
-	closer := cNode.levelTwo.routingTable.NearestPeers(kb.ConvertKey(pmes.GetKey()), count)
+	closer := cNode.levelTwo.routingTable.NearestPeers(kb.ConvertKey(string(pmes.GetKey())), count)
 	return closer
 }
 
 func (cNode *coralNode) findAndAddNextNode(ctx context.Context, key string, receiverNode peer.ID) (peer.ID, error) {
 	fmt.Printf("Entered findandAddNextNode for key: %s, and recievernode: %s \n", key, receiverNode)
-	pmes := pb.NewMessage(pb.Message_FIND_NODE, key, 0)
+	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(key), 0)
 	resp, err := cNode.sendRequest(ctx, receiverNode, pmes)
 	if err != nil {
 		return peer.ID(""), err

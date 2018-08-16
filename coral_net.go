@@ -9,7 +9,7 @@ import (
 
 	ggio "github.com/gogo/protobuf/io"
 	ctxio "github.com/jbenet/go-context/io"
-	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
 	inet "github.com/libp2p/go-libp2p-net"
 	peer "github.com/libp2p/go-libp2p-peer"
 )
@@ -48,7 +48,7 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 		cNode.updateFromMessage(ctx, mPeer, pmes)
 
 		// get handler for this msg type.
-		handler := cNode .handlerForMsgType(pmes.GetType())
+		handler := cNode.handlerForMsgType(pmes.GetType())
 		if handler == nil {
 			s.Reset()
 			fmt.Printf("got back nil handler from handlerForMsgType")
@@ -118,7 +118,7 @@ func (cNode *coralNode) sendMessage(ctx context.Context, p peer.ID, pmes *pb.Mes
 
 func (cNode *coralNode) updateFromMessage(ctx context.Context, p peer.ID, mes *pb.Message) error {
 	// Make sure that this node is actually a cNode server, not just a client.
-	protos, err := cNode.peerstore.SupportsProtocols(p, cNode .protocolStrs()...)
+	protos, err := cNode.peerstore.SupportsProtocols(p, cNode.protocolStrs()...)
 	if err == nil && len(protos) > 0 {
 		cNode.Update(ctx, p)
 	}
@@ -132,7 +132,7 @@ func (cNode *coralNode) messageSenderForPeer(p peer.ID) (*messageSender, error) 
 	// 	cNode.smlk.Unlock()
 	// 	return ms, nil
 	// }
-	ms = &messageSender{p: p, cNode : cNode }
+	ms = &messageSender{p: p, cNode: cNode}
 	cNode.strmap[p] = ms
 	//cNode .smlk.Unlock()
 
@@ -140,30 +140,29 @@ func (cNode *coralNode) messageSenderForPeer(p peer.ID) (*messageSender, error) 
 		//cNode .smlk.Lock()
 		//defer cNode .smlk.Unlock()
 
-	msCur := cNode.strmap[p];
-			// Changed. Use the new one, old one is invalid and
-			// not in the map so we can just throw it away.
-			if ms != msCur {
-				return msCur, nil
-			}
-			// Not changed, remove the now invalid stream from the
-			// map.
-			delete(cNode .strmap, p)
-				return nil, err
+		msCur := cNode.strmap[p]
+		// Changed. Use the new one, old one is invalid and
+		// not in the map so we can just throw it away.
+		if ms != msCur {
+			return msCur, nil
 		}
-		// Invalid but not in map. Must have been removed by a disconnect.
-
+		// Not changed, remove the now invalid stream from the
+		// map.
+		delete(cNode.strmap, p)
+		return nil, err
+	}
+	// Invalid but not in map. Must have been removed by a disconnect.
 
 	// All ready to go.
 	return ms, nil
 }
 
 type messageSender struct {
-	s   inet.Stream
-	r   ggio.ReadCloser
-	w   ggio.WriteCloser
-	lk  sync.Mutex
-	p   peer.ID
+	s     inet.Stream
+	r     ggio.ReadCloser
+	w     ggio.WriteCloser
+	lk    sync.Mutex
+	p     peer.ID
 	cNode *coralNode
 
 	invalid   bool
@@ -199,7 +198,7 @@ func (ms *messageSender) prep() error {
 		return nil
 	}
 
-	nstr, err := ms.cNode .host.NewStream(ms.cNode .ctx, ms.p, ms.cNode .protocols...)
+	nstr, err := ms.cNode.host.NewStream(ms.cNode.ctx, ms.p, ms.cNode.protocols...)
 	if err != nil {
 		return err
 	}
@@ -230,10 +229,10 @@ func (ms *messageSender) SendMessage(ctx context.Context, pmes *pb.Message) erro
 			ms.s = nil
 
 			if retry {
-			//	log.Info("error writing message, bailing: ", err)
+				//	log.Info("error writing message, bailing: ", err)
 				return err
 			} else {
-			//	log.Info("error writing message, trying again: ", err)
+				//	log.Info("error writing message, trying again: ", err)
 				retry = true
 				continue
 			}
@@ -269,7 +268,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 				//log.Info("error writing message, bailing: ", err)
 				return nil, err
 			} else {
-			//	log.Info("error writing message, trying again: ", err)
+				//	log.Info("error writing message, trying again: ", err)
 				retry = true
 				continue
 			}

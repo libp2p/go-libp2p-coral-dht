@@ -1,20 +1,21 @@
-
 package coral
+
 import (
+	"bytes"
 	"context"
 	"errors"
-	"time"
 	"fmt"
-	ds "github.com/ipfs/go-datastore"
-	pb "github.com/libp2p/go-libp2p-coral-dht/pb"
-recpb "github.com/libp2p/go-libp2p-record/pb"
-	peer "github.com/libp2p/go-libp2p-peer"
-base32 "github.com/whyrusleeping/base32"
-proto "github.com/gogo/protobuf/proto"
-u "github.com/ipfs/go-ipfs-util"
-pstore "github.com/libp2p/go-libp2p-peerstore"
-//inet "github.com/libp2p/go-libp2p-net"
+	"time"
 
+	proto "github.com/gogo/protobuf/proto"
+	ds "github.com/ipfs/go-datastore"
+	u "github.com/ipfs/go-ipfs-util"
+	pb "github.com/libp2p/go-libp2p-kad-dht/pb"
+	peer "github.com/libp2p/go-libp2p-peer"
+	pstore "github.com/libp2p/go-libp2p-peerstore"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
+	base32 "github.com/whyrusleeping/base32"
+	//inet "github.com/libp2p/go-libp2p-net"
 )
 
 type cNodeHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, error)
@@ -26,7 +27,7 @@ func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler
 	case pb.Message_PUT_VALUE:
 		return cNode.handlePutValue
 	case pb.Message_FIND_NODE:
-	 return cNode.handleFindPeer
+		return cNode.handleFindPeer
 	// case pb.Message_ADD_PROVIDER:
 	// 	return cNode.handleAddProvider
 	// case pb.Message_GET_PROVIDERS:
@@ -39,7 +40,7 @@ func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler
 }
 func cleanRecord(rec *recpb.Record) {
 	rec.XXX_unrecognized = nil
-	rec.TimeReceived = nil
+	rec.TimeReceived = ""
 }
 
 func convertToDsKey(s string) ds.Key {
@@ -54,19 +55,19 @@ func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.
 		return nil, errors.New("nil record")
 	}
 
-	if pmes.GetKey() != rec.GetKey() {
+	if !bytes.Equal([]byte(pmes.GetKey()), rec.GetKey()) {
 		return nil, errors.New("put key doesn't match record key")
 	}
 
 	cleanRecord(rec)
 
 	// Make sure the record is valid (not expired, valid signature etc)
-	if err = cNode.Validator.Validate(rec.GetKey(), rec.GetValue()); err != nil {
+	if err = cNode.Validator.Validate(string(rec.GetKey()), rec.GetValue()); err != nil {
 		//log.Warningf("Bad dht record in PUT from: %s. %s", p.Pretty(), err)
 		return nil, err
 	}
 
-	dskey := convertToDsKey(rec.GetKey())
+	dskey := convertToDsKey(string(rec.GetKey()))
 
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
@@ -90,7 +91,7 @@ func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.
 	// }
 
 	// record the time we receive every record
-	rec.TimeReceived = proto.String(u.FormatRFC3339(time.Now()))
+	rec.TimeReceived = u.FormatRFC3339(time.Now())
 
 	data, err := proto.Marshal(rec)
 	if err != nil {
@@ -104,13 +105,10 @@ func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.
 
 func (cNode *coralNode) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 
-
- resp := pb.NewMessage(pmes.GetType(), "", pmes.GetClusterLevel())
- var nearest []peer.ID
-
+	resp := pb.NewMessage(pmes.GetType(), nil, pmes.GetClusterLevel())
+	var nearest []peer.ID
 
 	nearest = cNode.nearestPeersToQuery(pmes, 1)
-
 
 	nearestinfos := pstore.PeerInfos(cNode.peerstore, nearest)
 	// possibly an over-allocation but this array is temporary anyways.
@@ -120,11 +118,11 @@ func (cNode *coralNode) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.
 		if len(pi.Addrs) > 0 && pi.ID != p {
 			withAddresses = append(withAddresses, pi)
 
-		fmt.Printf("handleFindPeer: sending back '%s' %s\n", pi.ID, pi.Addrs)
+			fmt.Printf("handleFindPeer: sending back '%s' %s\n", pi.ID, pi.Addrs)
 		}
 	}
 
-  resp.CloserPeers = pb.PeerInfosToPBPeers(cNode.host.Network(), withAddresses)
+	resp.CloserPeers = pb.PeerInfosToPBPeers(cNode.host.Network(), withAddresses)
 	fmt.Printf("Response closer peers %s\n", resp.CloserPeers)
 	return resp, nil
 }
