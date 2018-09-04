@@ -16,6 +16,7 @@ import (
 
 var cNodeReadMessageTimeout = time.Minute
 var ErrReadTimeout = fmt.Errorf("timed out reading response")
+var waitlock sync.Mutex
 
 // handleNewStream implements the inet.StreamHandler
 func (cNode *coralNode) handleNewStream(s inet.Stream) {
@@ -23,6 +24,7 @@ func (cNode *coralNode) handleNewStream(s inet.Stream) {
 }
 
 func (cNode *coralNode) handleNewMessage(s inet.Stream) {
+
 	ctx := cNode.ctx
 	cr := ctxio.NewReader(ctx, s) // ok to use. we defer close stream in this func
 	cw := ctxio.NewWriter(ctx, s) // ok to use. we defer close stream in this func
@@ -32,15 +34,18 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 
 	for {
 		// receive msg
+
 		pmes := new(pb.Message)
 		switch err := r.ReadMsg(pmes); err {
 		case io.EOF:
 			s.Close()
 			return
 		case nil:
+		//	fmt.Printf("no error")
 		default:
 			s.Reset()
-			fmt.Printf("Error unmarshaling data: %s", err)
+			//fmt.Printf("Error unmarshaling data: %s\n", err)
+			//fmt.Printf("%s\n", pmes.GetType())
 			return
 		}
 
@@ -49,9 +54,10 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 
 		// get handler for this msg type.
 		handler := cNode.handlerForMsgType(pmes.GetType())
+		//fmt.Printf("handle : %s\n", pmes.GetType())
 		if handler == nil {
 			s.Reset()
-			fmt.Printf("got back nil handler from handlerForMsgType")
+			//fmt.Printf("got back nil handler from handlerForMsgType")
 			return
 		}
 
@@ -65,7 +71,7 @@ func (cNode *coralNode) handleNewMessage(s inet.Stream) {
 
 		// if nil response, return it before serializing
 		if rpmes == nil {
-			//log.Debug("got back nil response from request")
+			fmt.Printf("got back nil response from request")
 			continue
 		}
 
@@ -126,19 +132,19 @@ func (cNode *coralNode) updateFromMessage(ctx context.Context, p peer.ID, mes *p
 }
 
 func (cNode *coralNode) messageSenderForPeer(p peer.ID) (*messageSender, error) {
-	// cNode.smlk.Lock()
-	ms := cNode.strmap[p]
-	// if ok {
-	// 	cNode.smlk.Unlock()
-	// 	return ms, nil
-	// }
+	cNode.smlk.Lock()
+	ms, ok := cNode.strmap[p]
+	if ok {
+		cNode.smlk.Unlock()
+		return ms, nil
+	}
 	ms = &messageSender{p: p, cNode: cNode}
 	cNode.strmap[p] = ms
-	//cNode .smlk.Unlock()
+	cNode.smlk.Unlock()
 
 	if err := ms.prepOrInvalidate(); err != nil {
-		//cNode .smlk.Lock()
-		//defer cNode .smlk.Unlock()
+		cNode.smlk.Lock()
+		defer cNode.smlk.Unlock()
 
 		msCur := cNode.strmap[p]
 		// Changed. Use the new one, old one is invalid and
@@ -175,6 +181,7 @@ type messageSender struct {
 func (ms *messageSender) invalidate() {
 	ms.invalid = true
 	if ms.s != nil {
+		//fmt.Printf("INVALIDATE")
 		ms.s.Reset()
 		ms.s = nil
 	}
@@ -304,7 +311,7 @@ func (ms *messageSender) SendRequest(ctx context.Context, pmes *pb.Message) (*pb
 }
 
 func (ms *messageSender) ctxReadMsg(ctx context.Context, mes *pb.Message) error {
-	fmt.Printf("ctxReadMsg\n")
+	//	fmt.Printf("ctxReadMsg\n")
 	errc := make(chan error, 1)
 	go func(r ggio.ReadCloser) {
 		errc <- r.ReadMsg(mes)

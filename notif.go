@@ -23,9 +23,13 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	if err == nil || len(protos) != 0 {
 		fmt.Printf("protocol success\n")
 
+		coralNode.plk.Lock()
+		defer coralNode.plk.Unlock()
 		if coralNode.host.Network().Connectedness(p) == inet.Connected {
 			coralNode.Update(coralNode.ctx, p)
+
 		}
+		return
 	}
 	// Note: Unfortunately, the peerstore may not yet know that this peer is
 	// a coralNode server. So, if it didn't return a positive response above, test
@@ -58,8 +62,8 @@ func (nn *netNotifiee) testConnection(v inet.Conn) {
 	// We lock here as we race with disconnect. If we didn't lock, we could
 	// finish processing a connect after handling the associated disconnect
 	// event and add the peer to the routing table after removing it.
-	//	coralNode.plk.Lock()
-	//defer coralNode.plk.Unlock()
+	coralNode.plk.Lock()
+	defer coralNode.plk.Unlock()
 	if coralNode.host.Network().Connectedness(p) == inet.Connected {
 
 		coralNode.Update(coralNode.ctx, p)
@@ -78,8 +82,8 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 
 	// Lock and check to see if we're still connected. We lock to make sure
 	// we don't concurrently process a connect event.
-	//	coralNode.plk.Lock()
-	//	defer coralNode.plk.Unlock()
+	coralNode.plk.Lock()
+	defer coralNode.plk.Unlock()
 	if coralNode.host.Network().Connectedness(p) == inet.Connected {
 		// We're still connected.
 		return
@@ -87,8 +91,8 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 
 	coralNode.levelTwo.routingTable.Remove(p)
 
-	//	coralNode.smlk.Lock()
-	//	defer coralNode.smlk.Unlock()
+	coralNode.smlk.Lock()
+	defer coralNode.smlk.Unlock()
 	ms, ok := coralNode.strmap[p]
 	if !ok {
 		return
@@ -102,7 +106,11 @@ func (nn *netNotifiee) Disconnected(n inet.Network, v inet.Conn) {
 		ms.invalidate()
 	}()
 }
-func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {}
-func (nn *netNotifiee) ClosedStream(n inet.Network, v inet.Stream) {}
-func (nn *netNotifiee) Listen(n inet.Network, a ma.Multiaddr)      {}
-func (nn *netNotifiee) ListenClose(n inet.Network, a ma.Multiaddr) {}
+func (nn *netNotifiee) OpenedStream(n inet.Network, v inet.Stream) {
+}
+func (nn *netNotifiee) ClosedStream(n inet.Network, v inet.Stream) {
+}
+func (nn *netNotifiee) Listen(n inet.Network, a ma.Multiaddr) {}
+func (nn *netNotifiee) ListenClose(n inet.Network, a ma.Multiaddr) {
+
+}
