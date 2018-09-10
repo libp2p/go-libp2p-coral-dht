@@ -22,11 +22,11 @@ type cNodeHandler func(context.Context, peer.ID, *pb.Message) (*pb.Message, erro
 
 func (cNode *coralNode) handlerForMsgType(t pb.Message_MessageType) cNodeHandler {
 	switch t {
-	case pb.Message_GET_VALUE:
+	case pb.Message_GET_VALUE: //gets value
 		return cNode.handleGetValue
-	case pb.Message_PUT_VALUE:
+	case pb.Message_PUT_VALUE: //puts value
 		return cNode.handlePutValue
-	case pb.Message_FIND_NODE:
+	case pb.Message_FIND_NODE: //returns closer peers
 		return cNode.handleFindPeer
 	// case pb.Message_ADD_PROVIDER:
 	// 	return cNode.handleAddProvider
@@ -46,6 +46,7 @@ func cleanRecord(rec *recpb.Record) {
 func convertToDsKey(s string) ds.Key {
 	return ds.NewKey(base32.RawStdEncoding.EncodeToString([]byte(s)))
 }
+
 func (cNode *coralNode) handleGetValue(ctx context.Context, p peer.ID, pmes *pb.Message) (_ *pb.Message, err error) {
 
 	resp := pb.NewMessage(pmes.GetType(), pmes.GetKey(), pmes.GetClusterLevel())
@@ -142,7 +143,7 @@ func (cNode *coralNode) handlePutValue(ctx context.Context, p peer.ID, pmes *pb.
 	}
 
 	dskey := convertToDsKey(string(rec.GetKey()))
-
+	//TODO: add this check back in
 	// Make sure the new record is "better" than the record we have locally.
 	// This prevents a record with for example a lower sequence number from
 	// overwriting a record with a higher sequence number.
@@ -197,7 +198,7 @@ func (cNode *coralNode) handleFindPeer(ctx context.Context, p peer.ID, pmes *pb.
 	}
 
 	resp.CloserPeers = pb.PeerInfosToPBPeers(cNode.host.Network(), withAddresses)
-	fmt.Printf("Response closer peers %s\n", resp.CloserPeers)
+	//fmt.Printf("Response closer peers %s\n", resp.CloserPeers)
 	return resp, nil
 }
 

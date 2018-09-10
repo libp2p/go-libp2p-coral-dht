@@ -64,7 +64,7 @@ func New(ctx context.Context, h host.Host, options ...opts.Option) (*coralNode, 
 	})
 
 	for _, p := range cfg.Protocols {
-		fmt.Printf("%s\n", p)
+		//fmt.Printf("%s\n", p)
 		h.SetStreamHandler(p, n.handleNewStream)
 	}
 
@@ -102,109 +102,118 @@ func (cNode *coralNode) Update(ctx context.Context, p peer.ID) {
 }
 
 func (cNode *coralNode) PutValue(ctx context.Context, key string, value []byte) error {
-
 	return cNode.insert(ctx, key, value)
 }
 
-func (cNode *coralNode) GetValue(ctx context.Context, key string) (<-chan []byte, error) {
+func (cNode *coralNode) GetValue(ctx context.Context, key string) (<-chan []byte, <-chan error) {
 
-	Value := make(chan []byte)
+	values := make(chan []byte)
+	errc := make(chan error)
 	go func() {
+		defer close(values)
+		//check local data store first, no point in searching other nodes if you already
+		//have the info!
 		rec, err := cNode.getLocal(key)
 		if err != nil {
-
+			errc <- err
 		}
 		if rec != nil {
 			value := rec.GetValue()
-			Value <- value
+			values <- value
 
 		} else {
-			lastNodeReached := cNode.clusterSearch(ctx, cNode.id, Value, 2, key)
+			lastNodeReached, err := cNode.clusterSearch(ctx, cNode.id, values, 2, key)
+			if err != nil {
+				errc <- err
+			}
 			//level 1 cluster search pick up from where you left off
-			lastNodeReached = cNode.clusterSearch(ctx, lastNodeReached, Value, 1, key)
+			lastNodeReached, err = cNode.clusterSearch(ctx, lastNodeReached, values, 1, key)
+			if err != nil {
+				errc <- err
+			}
 			//level 0 cluster search pick up from where you left off
-			lastNodeReached = cNode.clusterSearch(ctx, lastNodeReached, Value, 0, key)
+			lastNodeReached, err = cNode.clusterSearch(ctx, lastNodeReached, values, 0, key)
+			if err != nil {
+				errc <- err
+			}
 		}
-		//close(value)
+
 	}()
-	return Value, nil
+
+	return values, nil
 }
 
 func (cNode *coralNode) Close() error {
 	return cNode.proc.Close()
 }
 
-//find node in own level two routing table
-//return slice of type peer ids
-// func (cNode *coralNode) findMidpointNode(key string, distance big.Int) []peer.ID {
-//
-// }
 func (cNode *coralNode) insert(ctx context.Context, key string, value []byte) error {
+	//what is the total distance to the key
 	totaldist := kb.Dist(cNode.id, key)
 	dist := kb.Dist(cNode.id, key)
-	//what is the total distance to the key
+	//set epsilon to 1
 	epsilon := big.NewInt(1)
-	//fmt.Printf("Distance from %s to %s is %s, %d\n", cNode.id.String(), key, totaldist.String(), totaldist.Cmp(epsilon))
-
+	//create a stack of nodes to keep track of path to destination node
 	var nodeStack []peer.ID
-
+	//variable for the "midpoint key" or "fake key" generated each iteration
 	nextKey := key
 	var chosenNode peer.ID
+	var err error
+	//while distance is greater than epsilon
 	for dist.Cmp(epsilon) > 0 {
-		fmt.Printf("Entered top of insert for loop\n")
-		nextKey = kb.CalculateMidpointKey(nextKey, dist) //add dist to previous Nextkey
-		if dist.Cmp(totaldist) != 0 {
-			fmt.Printf("chosen node: %s\n", chosenNode) //for first round, this is messy fix it
+
+		nextKey = kb.CalculateMidpointKey(nextKey, dist) //add dist to previous nextkey
+
+		if dist.Cmp(totaldist) != 0 { //for first round check, this is messy
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
-			go func(key string, p peer.ID) {
-				ctx, cancel := context.WithCancel(ctx)
-				defer cancel()
+			go func(key string, p peer.ID, err error) {
+				ctx, _ := context.WithCancel(ctx)
 				defer wg.Done()
-
 				peer, err := cNode.findAndAddNextNode(ctx, nextKey, chosenNode)
-				if err != nil {
-					//log.Debugf("failed putting value to peer: %s", err)
-				}
 				notif.PublishQueryEvent(ctx, &notif.QueryEvent{
 					Type: notif.Value,
 					ID:   peer,
 				})
 
-			}(nextKey, chosenNode)
+			}(nextKey, chosenNode, err)
 
 			wg.Wait()
+			if err != nil {
+				return err
+			}
 		}
-
+		//after you have added the found node into your routing table, query the routing
+		//table for the nearest peer to the key (in case you have a closer peer to this
+		// midpoint key)
 		chosenNode = cNode.levelTwo.routingTable.NearestPeer(kb.ConvertKey(nextKey))
 		nodeStack = append(nodeStack, chosenNode)
 		dist = dist.Div(dist, big.NewInt(2))
 
 	}
+	//put value to peer now
 	rec := record.MakePutRecord(key, value)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go func(p []peer.ID, rec *recpb.Record, key string) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	go func(p []peer.ID, rec *recpb.Record, key string, err error) {
+		ctx, _ := context.WithCancel(ctx)
+
 		defer wg.Done()
 
 		peer, err := cNode.putValueToPeer(ctx, nodeStack, rec, key)
-		if err != nil {
-			//log.Debugf("failed putting value to peer: %s", err)
-		}
+
 		notif.PublishQueryEvent(ctx, &notif.QueryEvent{
 			Type: notif.Value,
 			ID:   peer,
 		})
 
-	}(nodeStack, rec, key)
+	}(nodeStack, rec, key, err)
 
 	wg.Wait()
 
-	return nil
+	return err
 }
 
 func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID, rec *recpb.Record, key string) (peer.ID, error) {
@@ -218,22 +227,16 @@ func (cNode *coralNode) putValueToPeer(ctx context.Context, nodeStack []peer.ID,
 		chosenNode = nodeStack[len(nodeStack)-1]
 		pmes := pb.NewMessage(pb.Message_PUT_VALUE, []byte(key), 0)
 		pmes.Record = rec
-		rpmes, err := cNode.sendRequest(ctx, chosenNode, pmes)
+		_, err := cNode.sendRequest(ctx, chosenNode, pmes)
 
-		fmt.Printf("rpmes info %s\n", rpmes.GetType())
-		fmt.Printf("Put to node %s\n", chosenNode)
-		fmt.Printf("Local node is %s\n", cNode.id)
 		if err != nil {
 			if err == ErrReadTimeout {
 				fmt.Printf("read timeout: %s %s", chosenNode.Pretty(), key)
 			}
-			//	fmt.Printf("here")
+
 			return chosenNode, err
 		}
 
-		// if !bytes.Equal(rpmes.GetRecord().Value, pmes.GetRecord().Value) {
-		// 	return errors.New("value not put correctly")
-		// }
 		fullAndLoaded = false
 	}
 	return chosenNode, nil
@@ -289,7 +292,8 @@ func (cNode *coralNode) nearestPeersToQuery(pmes *pb.Message, p peer.ID, count i
 }
 
 func (cNode *coralNode) findAndAddNextNode(ctx context.Context, key string, receiverNode peer.ID) (peer.ID, error) {
-	fmt.Printf("Entered findandAddNextNode for key: %s, and recievernode: %s \n", key, receiverNode)
+	//fmt.Printf("Entered findandAddNextNode for key: %s, and recievernode: %s \n", key, receiverNode)
+
 	pmes := pb.NewMessage(pb.Message_FIND_NODE, []byte(key), 2)
 	resp, err := cNode.sendRequest(ctx, receiverNode, pmes)
 	if err != nil {
@@ -306,80 +310,81 @@ func (cNode *coralNode) findAndAddNextNode(ctx context.Context, key string, rece
 		nextNode = receiverNode
 	}
 	///	once you get the next node, add it to your routing table
-	cNode.sortNode(nextNode)
+	cNode.Update(ctx, nextNode)
 
-	fmt.Printf("Found node id: %s\n", nextNode.Pretty())
-	//return receiverNode, nil
+	//fmt.Printf("Found node id: %s\n", nextNode.Pretty())
 	return nextNode, nil
 }
 
 //Cluster search searches a given cluster that a node belongs to for a key
 //Want to surface most local values first
-func (cNode *coralNode) clusterSearch(ctx context.Context, nodeid peer.ID, Value chan []byte, clusterLevel int, key string) peer.ID {
+func (cNode *coralNode) clusterSearch(ctx context.Context, nodeid peer.ID, Value chan []byte, clusterLevel int, key string) (peer.ID, error) {
 	totaldist := kb.Dist(nodeid, key)
 	dist := kb.Dist(nodeid, key)
 	goalkey := key
-
+	var mostRecentSuccess peer.ID
 	epsilon := big.NewInt(1)
 	var chosenNode peer.ID
 	nextKey := key
 	for dist.Cmp(epsilon) > 0 {
-		fmt.Printf("Entered top of cluster search for loop %d\n", clusterLevel)
+
 		nextKey = kb.CalculateMidpointKey(nextKey, dist) //add dist to previous Nextkey
 		if dist.Cmp(totaldist) != 0 {
-			fmt.Printf("chosen node: %s\n", chosenNode)
-			value := cNode.findNextNodeAndVal(ctx, goalkey, nextKey, chosenNode, clusterLevel)
-			//fmt.Printf("here\n")
-			if value != nil {
-				Value <- value
+
+			if chosenNode != mostRecentSuccess {
+				value, err := cNode.findNextNodeAndVal(ctx, goalkey, nextKey, chosenNode, clusterLevel)
+				if err != nil {
+					return chosenNode, err
+				}
+				if value != nil {
+					mostRecentSuccess = chosenNode
+					Value <- value
+				}
 			}
 		}
 		//query routing table
 		chosenNode = cNode.levelTwo.routingTable.NearestPeer(kb.ConvertKey(nextKey))
+
 		dist = dist.Div(dist, big.NewInt(2))
 	}
-	fmt.Printf("finished")
-	return chosenNode
+	return chosenNode, nil
 
 }
 
-func (cNode *coralNode) findNextNodeAndVal(ctx context.Context, goalkey string, fakekey string, nodeid peer.ID, clusterlevel int) []byte {
+func (cNode *coralNode) findNextNodeAndVal(ctx context.Context, goalkey string, fakekey string, nodeid peer.ID, clusterlevel int) ([]byte, error) {
 	var value []byte
 	wg := sync.WaitGroup{}
+	var err error
 	wg.Add(1)
-	go func(key string, p peer.ID, clusterlevel int) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	go func(key string, p peer.ID, clusterlevel int, err error) {
+		ctx, _ := context.WithCancel(ctx)
 		defer wg.Done()
 		//		fmt.Printf("request from %s\n", p)
 		pmes := pb.NewMessage(pb.Message_GET_VALUE, []byte(goalkey), clusterlevel)
 		resp, err := cNode.sendRequest(ctx, p, pmes)
 		if err != nil {
-			fmt.Printf("%s", err)
+			return
 		}
 		value = resp.GetRecord().GetValue()
-		// notif.PublishQueryEvent(ctx, &notif.QueryEvent{
-		// 	Type: notif.Value,
-		// 	ID:   peer,
-		// })
 
-	}(goalkey, nodeid, clusterlevel)
+	}(goalkey, nodeid, clusterlevel, err)
 
 	wg.Wait()
-
+	if err != nil {
+		return nil, err
+	}
 	wg = sync.WaitGroup{}
 	wg.Add(1)
-	go func(key string, p peer.ID, clusterlevel int) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	go func(key string, p peer.ID, clusterlevel int, err error) {
+		ctx, _ := context.WithCancel(ctx)
+
 		defer wg.Done()
 
 		pmesnode := pb.NewMessage(pb.Message_FIND_NODE, []byte(fakekey), clusterlevel)
 		resp, err := cNode.sendRequest(ctx, nodeid, pmesnode)
 		if err != nil {
-			fmt.Printf("%s", err)
+			return
 		}
-
 		closer := resp.GetCloserPeers()
 		clpeers := pb.PBPeersToPeerInfos(closer)
 		var nextNode peer.ID
@@ -390,15 +395,15 @@ func (cNode *coralNode) findNextNodeAndVal(ctx context.Context, goalkey string, 
 			nextNode = nodeid
 		}
 		//once you get the next node, add it to your routing table
-		cNode.sortNode(nextNode)
-	}(fakekey, nodeid, clusterlevel)
+		cNode.Update(ctx, nextNode)
+	}(fakekey, nodeid, clusterlevel, err)
 
 	wg.Wait()
 
 	if value == nil {
-		return nil
+		return nil, nil
 	} else {
-		return value
+		return value, nil
 	}
 }
 
@@ -485,22 +490,3 @@ func (cNode *coralNode) sortNode(p peer.ID) {
 	cNode.levelTwo.routingTable.Update(p)
 	// level 2
 }
-
-//}
-
-//possible code to reuse
-
-//ping/pong
-//find_value
-//store
-//find_node
-//what is different about the way cNodes need to talk to each other?
-//need to pass around cluster information in RPC header
-//cluster ids and cluster size
-//and save it in map
-
-//need to be implemented:
-//insertion/retrieval
-//every CNode needs a stack for forward/reverse phase of insertion
-
-//merging/splitting clusters

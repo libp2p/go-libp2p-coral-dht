@@ -1,8 +1,6 @@
 package coral
 
 import (
-	"fmt"
-
 	inet "github.com/libp2p/go-libp2p-net"
 	ma "github.com/multiformats/go-multiaddr"
 	mstream "github.com/multiformats/go-multistream"
@@ -21,7 +19,6 @@ func (nn *netNotifiee) Connected(n inet.Network, v inet.Conn) {
 	p := v.RemotePeer()
 	protos, err := coralNode.peerstore.SupportsProtocols(p, coralNode.protocolStrs()...)
 	if err == nil || len(protos) != 0 {
-		fmt.Printf("protocol success\n")
 
 		coralNode.plk.Lock()
 		defer coralNode.plk.Unlock()
